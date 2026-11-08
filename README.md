@@ -62,6 +62,7 @@ scripts/dump-adt.py             反解 ADT，无 console 时用来核对
 scripts/install-device-patches.py  把设备补丁放进 format 1 构建会扫的位置
 scripts/extract-pac.py          官方 .pac 固件的分区列表/提取
 scripts/fastboot-lite.py        libusb + ctypes 的最小 fastboot 客户端
+scripts/bringup.sh              一条命令走完：进 fastboot → 探活 → 可选刷写
 scripts/build-payload.py        汇编裸机 payload 并套官方 boot.img 头
 scripts/check-adt.py            按 XNU 源码的字节级要求校验 ADT
 scripts/kernel-loadplan.py      解析内核段表，算出 loader 该搬哪、跳哪
