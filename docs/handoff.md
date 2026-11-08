@@ -4,8 +4,9 @@
 
 ## 一句话现状
 
-代码链路已完整构建并逐环验证到"能跳进 XNU"为止；**但一个字节都没在真机上跑过**，
-因为手机卡在 USB 无响应状态，需要物理断电重启。
+**USB 与刷写链路已经打通**（见下），`hello-uart` 探针**已经写进 boot 分区**；
+刷完之后设备失联，尚未确认是我们的代码跑起来了、还是 bootloader 卡住了——
+**需要有人看一眼屏幕**。XNU 本身仍未在硬件上运行过。
 
 ## 已经验证的事实（可复核，不是推测）
 
@@ -45,36 +46,79 @@
 | 两者都无，但 `flash` 返回成功 | 镜像没被执行，或两信道都不可用 | 看 fastboot 返回值与设备是否卡死 |
 | `FAILED (remote: ...)` | bootloader 拒绝 | 记错误码 |
 
-## 设备卡在哪
+## 通信是怎么打通的（重要，别再走弯路）
 
-**当前状态**：`ioreg` 里设备在（`fastboot Gadget`，实例 id `0x10003dda3`），
-`GET_DESCRIPTOR` 能返回 32 字节（很可能是 macOS 回放缓存），但
-`GET_CONFIGURATION` / `GET_STATUS` / 所有 bulk 传输**全部超时**，`claim_interface` 返回 `-99`。
+有很长一段时间我以为是设备不支持 macOS 的 fastboot。**其实是自写客户端有三个 bug**：
 
-**怎么变成这样的**（两个都是我造成的，别重复）：
+| Bug | 现象 | 修法 |
+| --- | --- | --- |
+| 读操作传了**长度 0** | macOS 对零长度 bulk IN 直接返回 stall，看起来像"设备卡死" | 新增 `Usb.read()`，显式给出缓冲区大小 |
+| 响应解析要求 `OKAY` + 4 位十六进制长度 | 老版 U-Boot **不发长度前缀**，`getvar:version` 只回 7 字节 `OKAY1.0`，被判为空响应 | 只在长度字段自洽时才剥离 |
+| 写超时当成致命错误 | macOS 上写经常返回 `-7` 但**数据已送达**，命令被发出后又被忽略 | 写当作尽力而为，以响应为准 |
 
-1. 第 1 轮用 platform-tools 发 `fastboot getvar`，命令挂住后我把它 kill 了——
-   **中断在半路的 fastboot gagdet 会卡死**。
-2. 第 3 轮我对卡死的 gadget 调了 `libusb_reset_device`，超时后设备从总线上消失。
-3. 后续又试了 `set_configuration(0)`、反复 `clear_halt`，把状态弄得更糟。
+修完后的实测（2026-11-08）：
+
+```
+getvar version          -> OKAY 1.0
+download:0010           -> DATA 00000010   -> OKAY
+36 MB 下载              -> 2.8 秒，零错误
+flash boot（原厂镜像）  -> OKAY
+reboot                  -> Android 正常起来
+flash boot（hello-uart）-> 写完设备失联
+```
+
+**所以 `fastboot flash` 是可用的**，回滚也验证过（原厂镜像写回去后系统正常）。
+
+## 当前卡在哪
+
+刷 `hello-uart` 之后，设备的 `fastboot Gadget` 重新枚举（实例 id 变成 `0x100047467`），
+然后不再响应任何命令，`adb` 也没有。
+
+两种可能，**只能靠看屏幕判断**：
+
+- **A：我们的代码跑了**（活的里程碑）。屏幕顶部约 21%（576×300 像素）应是**纯白色**
+- **B：还在 bootloader 里卡着**。屏幕是 fastboot 界面或开机 logo，没有白条
+
+长按电源键 10~15 秒后：
+- 能进 Android → 刷写没落盘（仍是原厂 boot）
+- 进不去 → **我们的代码在跑**，需要用按键组合进 fastboot 刷回原厂
+
+回滚一条命令（已支持 `.gz`）：
+
+```sh
+python3 scripts/fastboot-lite.py --libusb /tmp/libusb/out/libusb-1.0.0.dylib \
+    flash boot firmware/stock-boot.img.gz --yes
+```
+
+## 早期把设备弄坏的操作（别重复）
+
+1. 第 1 轮用 platform-tools 发 `fastboot getvar`，命令挂住后 kill 了它——
+   **中断在半路的 fastboot gadget 会卡死**。
+2. 第 3 轮对卡死的 gadget 调 `libusb_reset_device`，超时后设备从总线上消失。
+3. 后续又试 `set_configuration(0)`、反复 `clear_halt`，越弄越糟。
 
 **恢复办法**：长按电源键 10~15 秒。没有软件办法。
 
 ## 恢复后怎么继续
 
 ```sh
-scripts/bringup.sh
+# 1. 进 fastboot（Android 在线时）
+adb reboot bootloader
+
+# 2. 探活
+python3 scripts/fastboot-lite.py --libusb /tmp/libusb/out/libusb-1.0.0.dylib getvar version
+
+# 3. 按风险从低到高刷
+python3 scripts/fastboot-lite.py --libusb /tmp/libusb/out/libusb-1.0.0.dylib \
+    flash boot build/payload/hello-uart-boot.img --yes
 ```
 
-它会：确认 Android 在线 → `adb reboot fastboot`（**注意不是 `bootloader`**，这是关键假设）
-→ 只读探活 → 读 `max-download-size`。写 flash 必须额外加 `--flash <image>` 并手动确认。
+**注意**：`adb reboot fastboot`（用 `fastboot` 而不是 `bootloader`）在这台机器上
+**只是普通重启回 Android**，不会进 fastboot。必须用 `bootloader`。
 
-如果 `adb reboot fastboot` 之后仍然不通，按顺序试：
-
-1. **按键组合**：关机后按住 音量键 + 电源（不走 adb，U-Boot 走的分支不同）
-2. **BROM**：`spd_dump` 已在本机编译通过（见 `docs/usb-fastboot-notes.md`），
-   配合 `fdl1-sign.bin` 和从 PAC 提取的分区表，可绕开 U-Boot 直接读写闪存
-3. **换机器**：Windows + 官方 ResearchDownload（整包 `.pac` 就是给它的）
+如果刷完之后连 fastboot 都进不去：关机后按住 音量键 + 电源。
+还不行就走 BROM（`spd_dump` 已在本机编译通过，见 `docs/usb-fastboot-notes.md`），
+或换 Windows 用官方 ResearchDownload。
 
 ## 刷写前必须做的一件事
 
