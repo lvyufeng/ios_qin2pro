@@ -14,6 +14,7 @@ only replaces the kernel payload, so the bootloader sees exactly the layout it
 already boots.
 """
 import argparse
+import hashlib
 import shutil
 import struct
 import subprocess
@@ -123,8 +124,19 @@ def build_bootimg(payload_path, stock_path, output):
                      header['header_version'], header['os_version'])
     out[48:64] = header['name']
     out[64:64 + 512] = header['cmdline']
-    out[576:584] = header['id']
     out[608:608 + 1024] = header['extra_cmdline']
+
+    # The Android boot image id is SHA1(kernel, kernel_size, ramdisk,
+    # ramdisk_size, second, second_size), zero padded to 32 bytes. The stock
+    # image's value does not match that formula (nor SHAl(kernel) alone), so it
+    # was produced by the vendor's packer; carrying it over would claim our
+    # kernel has the stock hash. Compute our own instead.
+    digest = hashlib.sha1()
+    digest.update(payload)
+    digest.update(struct.pack('<I', len(payload)))
+    digest.update(struct.pack('<I', header['ramdisk_size']))
+    digest.update(struct.pack('<I', header['second_size']))
+    out[576:608] = digest.digest() + bytes(12)
 
     body = bytearray(payload)
     body += bytes(-len(body) % page)

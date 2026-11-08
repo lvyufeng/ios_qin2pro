@@ -166,6 +166,31 @@ python3 scripts/build-payload.py bootimg --payload build/payload/loader-v0.bin \
 
 产物 14 144 字节（代码约 656 + ADT 13 488），**零重定位**，`boot.img` 16 384 字节。
 
+### `boot.img` 头的 `id` 字段
+
+Android boot image 头的偏移 `576` 处有一个 32 字节的 `id`。我们最初**直接抄了原厂的**，
+这是错的——原厂那个值用任何标准公式都复现不出来：
+
+```
+原厂 id     2934b9dd53ed83ef43f9dfc09b8e9bc5e9faa02c
+SHA1(kernel) 6b539acb71d9fd291fc5ae52b0d3cd6e7c45dc0b
+```
+
+也不是 AOSP 的 `SHA1(kernel ‖ kernel_size ‖ ramdisk ‖ ramdisk_size ‖ second ‖ second_size)`
+（`407c9dba…`）。**它是展锐打包工具自己算的。**
+
+抄过来等于声称"我们的内核哈希是原厂那个"——纯属误导。现在按 AOSP 公式现算，
+三个镜像都验证过：
+
+```
+hello-uart   id matches AOSP formula: True
+loader-v0    id matches AOSP formula: True
+loader-v1    id matches AOSP formula: True
+```
+
+没有证据表明 U-Boot 会校验这个字段（校验失败通常会有对应的错误串，二进制里没有），
+所以它更多是"自描述"的意义。但既然能算对，就不该留一个假的。
+
 ### 一个汇编上的坑
 
 `movz` 的立即数必须是汇编期可求的常数，而 `adt_end - adt_blob` 这种**标签差**不行
