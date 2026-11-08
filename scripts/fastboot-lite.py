@@ -296,7 +296,11 @@ def main():
     if args.command == 'flash':
         if not args.yes:
             raise SystemExit('refusing to write flash: pass --yes to confirm')
-        payload = open(args.image, 'rb').read()
+        if args.image.endswith('.gz'):
+            import gzip
+            payload = gzip.open(args.image, 'rb').read()
+        else:
+            payload = open(args.image, 'rb').read()
         print('downloading %d bytes' % len(payload), file=sys.stderr)
         result = fb.download(payload)
         if not result or result[0] != 'OKAY':
