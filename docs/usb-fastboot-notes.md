@@ -74,3 +74,64 @@ gadget 不要发 USB reset**。
 2. 每条命令都要有读超时，且在超时后**不要再发下一条**——先把设备断电重启。
 3. 验证 `fastboot boot` 之前，先跑 `getvar:version` 确认链路是活的。
 4. `fastboot-lite.py boot` 只做 `download` + `boot`，不写任何分区。
+
+## 第二轮尝试：设备回来了，但 fastboot 仍然不通
+
+用户重启后设备正常回到 Android（`adb` 认到 `Qin2ProSM1912020243`，
+`verifiedbootstate=orange`、`flash.locked=0`）。`adb reboot bootloader` 之后设备重新枚举，
+描述符完全正常：
+
+```
+bcdUSB 0x0200  class 0xff  speed=high
+interface 0: ff/42/03          ← 标准 fastboot
+endpoints:   0x06 OUT bulk 512 / 0x85 IN bulk 512
+```
+
+但**控制传输正常、批量传输全部失败**：
+
+| 操作 | 结果 |
+| --- | --- |
+| 读配置描述符（EP0） | ✅ 32 字节正确 |
+| 写 `getvar:version`（`0x06`） | `-7` 超时 |
+| 读（`0x85`） | `-8` stall / `-9` overflow |
+| 零长度写 | `-7` 超时 |
+| 512 字节整包写 | `-7` 超时 |
+| `clear_halt` / `set_interface_alt_setting` | `-99`（后端不支持） |
+| 反复尝试后 `claim_interface` | 也变成 `-99` |
+
+**官方 platform-tools `fastboot devices` 同样为空**，所以不是自写客户端的问题。
+
+### 最可能的原因：设备停在某个菜单/提示上
+
+U-Boot 的字符串里有：
+
+```
+mode: recovery, fastboot, dloader, charge, normal, vlx, caliberation.
+```
+
+如果 `adb reboot bootloader` 没有指明模式，或者设备在等按键确认，**USB gadget 会被枚举
+出来但不进入 fastboot 服务循环**——现象正是"能读描述符、不能做批量传输"。
+
+### 下一步要确认的
+
+1. 手机屏幕在 fastboot 状态下显示什么？有没有菜单或提示？
+2. 拔插 USB 线能否让它重新枚举并武装端点？
+3. 关机后按 **音量键 + 电源** 直接进 fastboot，是否与 `adb reboot bootloader` 不同？
+
+## 备用通道：BROM / spd_dump
+
+如果 fastboot 在 macOS 上就是不通，可以绕开 U-Boot，直接和 SoC 的 BootROM 说话。
+
+`CE1CECL/spd_dump` 已在本机编译通过（用它自带的 libusb）：
+
+```sh
+git clone --depth 1 https://github.com/CE1CECL/spd_dump
+mkdir -p /tmp/libusb-inc/libusb-1.0
+ln -sf /tmp/libusb/libusb/libusb.h /tmp/libusb-inc/libusb-1.0/libusb.h
+cd spd_dump && make GITVER.h
+clang -O2 -DUSE_LIBUSB=1 -I/tmp/libusb-inc -o spd_dump spd_dump.c common.c \
+    /tmp/libusb/out/libusb-1.0.0.dylib -Wl,-rpath,/tmp/libusb/out -lm
+```
+
+BROM 模式在 SoC 内部，不受 U-Boot 状态影响，但它需要**物理按键组合**进入，而且写分区
+要按展锐的 DLOAD 协议走（FDL1 → FDL2）。这条路尚未在设备上验证过。
