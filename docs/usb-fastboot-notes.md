@@ -135,3 +135,48 @@ clang -O2 -DUSE_LIBUSB=1 -I/tmp/libusb-inc -o spd_dump spd_dump.c common.c \
 
 BROM 模式在 SoC 内部，不受 U-Boot 状态影响，但它需要**物理按键组合**进入，而且写分区
 要按展锐的 DLOAD 协议走（FDL1 → FDL2）。这条路尚未在设备上验证过。
+
+## 第三轮：fastboot 本身通了，但 flash 被内容校验挡住
+
+修好客户端的三个 bug 之后（零长度读、长度前缀、写超时），通信完全正常：
+
+```
+getvar version           -> OKAY 1.0
+download:0010            -> DATA 00000010 -> OKAY
+36 MB 下载               -> 2.8 秒，零错误
+flash boot（原厂镜像）   -> OKAY，重启后系统正常
+```
+
+但**只要镜像内容被改过，`flash:boot` 就不回话**，设备的 USB 重新枚举后失联，
+必须断电重启。手机随后仍能正常启动，说明 boot 分区**没有被写**。
+
+| 镜像 | 结果 |
+| --- | --- |
+| 原厂 `boot.img`（未改动） | `OKAY` |
+| `hello-uart`（4 KB） | 无响应 |
+| `hello-uart` 补零到 36,700,160（同尺寸） | 无响应 |
+| 原厂镜像 + 命令行改一处 | **无响应** |
+| 原厂镜像 + 填充区改一个字节 | 未测完（设备已卡） |
+
+### 原因：原厂镜像带 AVB 签名
+
+原厂 `boot.img` 末尾 64 字节是 AVB footer：
+
+```
+magic                AVBf  @ 36,700,096
+original_image_size  17,360,896
+vbmeta_offset        17,362,944
+vbmeta_size          2,112
+```
+
+我们生成的镜像没有这个结构。bootloader 在 `flash` 时会解析并校验它，
+校验不过就不写、并让 USB 挂死。改一个命令行字节就足以触发。
+
+**这意味着 fastboot 这条路对自制镜像是关的**——没有 OEM 私钥就没法生成合法签名。
+
+### 仍然可行的路
+
+1. **官方刷机工具（ResearchDownload / SPD Flash Tool）** 走 BROM/FDL2，
+   完全绕开 U-Boot 的校验。PAC 里 `boot.img` 位于偏移 `0x03cec102`，
+   长度 36,700,160，正好等于我们补齐后的镜像长度，可以**原位替换**。
+2. 找找 bootloader 有没有关掉校验的 OEM 命令（fastboot 命令表里有 `oem`）。
