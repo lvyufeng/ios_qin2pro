@@ -1,0 +1,9 @@
+# Build output and local tool checkouts
+build/
+socs/
+components/
+devices/*/
+!devices/README.md
+
+# macOS
+.DS_Store

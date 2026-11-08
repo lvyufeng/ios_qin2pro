@@ -1,0 +1,50 @@
+[board]
+name = "s9863a1h10"
+soc = "unisoc-sc9863a-sharkl3-s9863a1h10"
+description = "Unisoc SC9863A / SharkL3 QIN 2 Pro bring-up"
+kit = "s9863a1h10"
+
+[kernel]
+# Ordered archive plan. The corecrypto pair must come first: with
+# CONFIG_XNU_SOURCE_CORECRYPTO14=1, prng_random.o references
+# _corecrypto_kext_start, which only that archive provides.
+archives = [
+    "install-device-patches.py",
+    "build-corecrypto-14.py",
+    "build-corecrypto-14.py --namespace",
+    "build-arm-driver.py ArmCpu",
+    "build-arm-driver.py ArmDTPlatform",
+    "build-arm-driver.py ArmVirtPlatform",
+    "build-libpthread-kernel.py",
+]
+
+[kernel.prelink]
+# This bring-up builds the kernel from Apple's open source alone, so there is no
+# kernelcache to prelink against yet. Build with --skip-prelink, which stages the
+# native kernel as kernel.macho unchanged. Fill in tool/kernelcache/slide/roots
+# when an IPSW and an OS profile are selected.
+kernel = "build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/mach.development.bcm2837"
+
+[payload]
+volume = "UNIXNU"
+size_mib = 64
+loader = "firmware"
+title = "UniXNU QIN 2 Pro"
+# DRAM base 0x80000000, 2 GiB (mainline sp9863a-1h10.dts memory@80000000)
+dram_size = "0x80000000"
+# UART may not be physically reachable on this phone: keep the panic screen on
+# so the framebuffer at 0x9e000000 is a working log channel regardless.
+panic_screen = true
+timeout = 0
+# serial=3 kept from the T610YP reference. Harmless if UART is silent: the
+# patched pe_serial.c registers the SPRD polled UART on its own.
+kernel_args = ["-v", "debug=0x144", "serial=3"]
+
+[payload.adt]
+tool = "scripts/make-s9863a1h10-adt.py"
+dram_size = "0x80000000"
+owned_memory_size = "0x7000000"
+psci_method = "smc"
+unique_chip_id = "required"
+# 8 x Cortex-A55, two clusters (0-3 / 4-7)
+cpu_regs = "0,0x100,0x200,0x300,0x400,0x500,0x600,0x700"

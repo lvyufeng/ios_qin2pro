@@ -1,0 +1,43 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// QIN 2 Pro (UNISOC SC9863A, board s9863a1h10).
+//
+// Board-level values only: memory, the framebuffer handoff region and which
+// peripherals are wired. SoC resources live in the shared SoC repository.
+
+/dts-v1/;
+/include/ "sc9863a.dtsi"
+
+/ {
+	model = "QIN 2 Pro (s9863a1h10)";
+	compatible = "sprd,sp9863a-1h10", "sprd,sc9863a";
+
+	memory@80000000 {
+		device_type = "memory";
+		reg = <0x0 0x80000000 0x0 0x80000000>;	/* 2 GiB */
+	};
+
+	reserved-memory {
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+
+		// The framebuffer reservation the stock device tree declares (32 MiB);
+		// for the OS. Size is the one the vendor DTS declares; do not overrun.
+		fb_reserved: framebuffer@9d000000 {
+			compatible = "sprd,logo-buffer";
+			unixnu,adt-name = "framebuffer";
+			reg = <0x0 0x9d000000 0x0 0x2000000>;
+			no-map;
+		};
+	};
+
+	chosen {
+		// The stock boot image's cmdline is "console=ttyS1,115200n8":
+		// ttyS1 is uart1 at 0x70100000.
+		stdout-path = &uart1;
+	};
+};
+
+&uart1 {
+	status = "okay";
+};

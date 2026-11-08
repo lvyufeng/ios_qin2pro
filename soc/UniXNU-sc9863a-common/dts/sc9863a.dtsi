@@ -1,0 +1,153 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// UNISOC SC9863A (SharkL3) SoC description.
+//
+// Every value comes from the vendor kernel:
+//   KevinXu07/android_kernel_qin_qin2pro @ qin2pro-bringup
+//     arch/arm64/boot/dts/sprd/sc9863a.dtsi      (cpus, gic, psci, timer)
+//     arch/arm64/boot/dts/sprd/sharkl3.dtsi      (ap-apb bus and its uarts)
+// and was cross-checked against mainline
+//   torvalds/linux arch/arm64/boot/dts/sprd/{sc9863a,sharkl3}.dtsi
+// See the device repository's docs/hardware-s9863a1h10.md for the line-by-line
+// provenance.
+
+/ {
+	compatible = "sprd,sc9863a";
+	#address-cells = <2>;
+	#size-cells = <2>;
+	interrupt-parent = <&gic>;
+
+	cpus {
+		#address-cells = <2>;
+		#size-cells = <0>;
+
+		cpu0: cpu@0 {
+			device_type = "cpu";
+			compatible = "arm,cortex-a55";
+			reg = <0x0 0x0>;
+			enable-method = "psci";
+		};
+		cpu1: cpu@100 {
+			device_type = "cpu";
+			compatible = "arm,cortex-a55";
+			reg = <0x0 0x100>;
+			enable-method = "psci";
+		};
+		cpu2: cpu@200 {
+			device_type = "cpu";
+			compatible = "arm,cortex-a55";
+			reg = <0x0 0x200>;
+			enable-method = "psci";
+		};
+		cpu3: cpu@300 {
+			device_type = "cpu";
+			compatible = "arm,cortex-a55";
+			reg = <0x0 0x300>;
+			enable-method = "psci";
+		};
+		cpu4: cpu@400 {
+			device_type = "cpu";
+			compatible = "arm,cortex-a55";
+			reg = <0x0 0x400>;
+			enable-method = "psci";
+		};
+		cpu5: cpu@500 {
+			device_type = "cpu";
+			compatible = "arm,cortex-a55";
+			reg = <0x0 0x500>;
+			enable-method = "psci";
+		};
+		cpu6: cpu@600 {
+			device_type = "cpu";
+			compatible = "arm,cortex-a55";
+			reg = <0x0 0x600>;
+			enable-method = "psci";
+		};
+		cpu7: cpu@700 {
+			device_type = "cpu";
+			compatible = "arm,cortex-a55";
+			reg = <0x0 0x700>;
+			enable-method = "psci";
+		};
+	};
+
+	psci {
+		compatible = "arm,psci-0.2";
+		method = "smc";
+	};
+
+	timer {
+		compatible = "arm,armv8-timer";
+		interrupts = <0x1 0xd 0x4>,	/* secure physical PPI 13 */
+			     <0x1 0xe 0x4>,	/* non-secure physical PPI 14 */
+			     <0x1 0xb 0x4>,	/* virtual PPI 11 */
+			     <0x1 0xa 0x4>;	/* hypervisor PPI 10 */
+		/* 0x18cba80 = 26 MHz, exactly what the firmware device tree declares. */
+		clock-frequency = <0x18cba80>;
+		arm,no-tick-in-suspend;
+	};
+
+	soc {
+		compatible = "simple-bus";
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+
+		gic: interrupt-controller@14000000 {
+			compatible = "arm,gic-v3";
+			unixnu,adt-name = "intc";
+			#interrupt-cells = <3>;
+			#address-cells = <2>;
+			#size-cells = <2>;
+			ranges;
+			interrupt-controller;
+			reg = <0x0 0x14000000 0x0 0x20000>,	/* GICD */
+			      <0x0 0x14040000 0x0 0x100000>;	/* GICR */
+			redistributor-stride = <0x0 0x20000>;
+			#redistributor-regions = <1>;
+			interrupts = <0x1 0x9 0x4>;	/* maintenance */
+		};
+
+		// AP-APB peripheral bus. Addresses below are absolute: this node maps
+		// identity with 2/2 cells, exactly as the device's own device tree does.
+		// uart0..3 are 0x70000000..0x70300000; the console is uart1 (ttyS1).
+		ap_apb: ap-apb {
+			compatible = "simple-bus";
+			#address-cells = <2>;
+			#size-cells = <2>;
+			ranges;
+
+			uart0: serial@70000000 {
+				compatible = "sprd,sc9863a-uart", "sprd,sc9836-uart";
+				unixnu,adt-name = "uart0";
+				reg = <0x0 0x70000000 0x0 0x100>;
+				interrupts = <0x0 0x2 0x4>;
+				status = "okay";
+			};
+
+			// console=ttyS1,115200n8 in the stock boot image's cmdline.
+			uart1: serial@70100000 {
+				compatible = "sprd,sc9863a-uart", "sprd,sc9836-uart";
+				unixnu,adt-name = "uart1";
+				reg = <0x0 0x70100000 0x0 0x100>;
+				interrupts = <0x0 0x3 0x4>;
+				status = "disabled";
+			};
+
+			uart2: serial@70200000 {
+				compatible = "sprd,sc9863a-uart", "sprd,sc9836-uart";
+				unixnu,adt-name = "uart2";
+				reg = <0x0 0x70200000 0x0 0x100>;
+				interrupts = <0x0 0x4 0x4>;
+				status = "disabled";
+			};
+
+			uart3: serial@70300000 {
+				compatible = "sprd,sc9863a-uart", "sprd,sc9836-uart";
+				unixnu,adt-name = "uart3";
+				reg = <0x0 0x70300000 0x0 0x100>;
+				interrupts = <0x0 0x5 0x4>;
+				status = "disabled";
+			};
+		};
+	};
+};

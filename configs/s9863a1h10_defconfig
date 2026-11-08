@@ -1,0 +1,26 @@
+# UNISOC SC9863A (SharkL3) / s9863a1h10 — minimal kernel-entry configuration.
+#
+# Deliberately excludes storage, display and GPU: the first milestone is XNU
+# entering the kernel and printing on the SPRD UART or the panic framebuffer,
+# exactly as the T610YP reference tree does.
+
+# Base machine configuration (GICv3, arm64 timer, video console, return path).
+CONFIG_XNU_MACHINE_CONFIG="BCM2837"
+CONFIG_XNU_ARM_DT_PLATFORM=y
+CONFIG_XNU_ARMCPU=y
+CONFIG_XNU_ARMVIRT_PLATFORM=y
+CONFIG_XNU_SOURCE_CORECRYPTO14=y
+CONFIG_XNU_SOURCE_PTHREAD=y
+CONFIG_XNU_CRYPTO_BOOTSTRAP="source"
+
+# Timers and PAN are architectural on Cortex-A55 and need no vendor support.
+CONFIG_XNU_NATIVE_ARCH_TIMER=y
+CONFIG_XNU_NATIVE_PAN=y
+CONFIG_XNU_NATIVE_TRUST_CACHE=0
+
+# Bring-up stage: nothing of the phone's yet.
+CONFIG_XNU_NATIVE_UFS=n
+CONFIG_XNU_NATIVE_MOBILE_DISPLAY=n
+CONFIG_XNU_NATIVE_ADRENO=n
+
+CONFIG_XNU_BUILD_ARCHIVES=y
