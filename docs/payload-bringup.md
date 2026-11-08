@@ -223,3 +223,69 @@ gPhysSize = ((gPhysBase + args->memSize) & ~PAGE_MASK) - gPhysBase;
   `br` 到 `0x823f8488`（入口偏移 `0x3f8488`）。
 - **内核尚未嵌入**。嵌进去镜像会变成约 15.9 MB，`fastboot` 的 `max-download-size` 是否够
   还不知道——设备回来才能查 `getvar:max-download-size`。
+
+
+## loader v1：真正跳进 XNU
+
+`payload/loader-v1.S` 是链条的最后一段——它不再只是构造结构，而是**把内核搬到位并转移控制权**。
+
+### 内存布局
+
+| 地址 | 内容 | 大小 |
+| --- | --- | --- |
+| `0x9f000000` | 摊平后的内核镜像 | `0xfdc000` |
+| `0x9f100000` | Apple Device Tree | 13 488 |
+| `0x9f101000` | `boot_args` | `0x480` |
+
+都在 DRAM 顶部那 1.5 GiB 空隙里（`0x9f000000..0x100000000`，固件保留区到 `0x9f000000` 为止）。
+配套 ADT 必须用同一窗口生成：
+
+```sh
+python3 scripts/make-s9863a1h10-adt.py --output build/adt-loader.dtb \
+    --dram-base 0x9f000000 --dram-size 0x80000000 --owned-memory-size 0x61000000 \
+    --cpu-regs 0,0x100,0x200,0x300,0x400,0x500,0x600,0x700
+```
+
+### 它做五件事
+
+1. 把内嵌的 `kernel-flat.bin` 拷到 `0x9f000000`（`ldp`/`stp`，32 字节一轮）
+2. 把内嵌的 ADT 拷到 `0x9f100000`
+3. 在 `0x9f101000` 建 `boot_args`：
+   `virtBase = 0xfffffff007004000`、`physBase = 0x9f000000`、
+   `memSize = 0x61000000`、`deviceTreeP = virtBase + 0x100000`
+4. 对刚写过的区间做 `dc civac` 清缓存（bootloader 可能开着 D-cache）
+5. 关 MMU / I-cache / D-cache，`br` 到 `0x9f000000 + 0x3f8488`，`x0 = boot_args`
+
+### 构建
+
+```sh
+python3 scripts/build-kernel-image.py build/artifacts/kernel.macho \
+    --output build/payload/kernel-flat.bin
+python3 scripts/build-payload.py payload --source payload/loader-v1.S \
+    --output build/payload/loader-v1.bin
+python3 scripts/build-payload.py bootimg --payload build/payload/loader-v1.bin \
+    --stock /path/to/stock/boot.img --output build/payload/loader-v1-boot.img
+```
+
+产物 16 643 984 字节（内核 16 629 760 + ADT 13 488 + 代码），`boot.img` 约 16.6 MB，
+比原厂 36 MB 小，能进 `boot` 分区。
+
+已验证：**零重定位**；内嵌的内核镜像与 ADT 与源文件**逐字节一致**；入口处字节 `f5060014`
+与 `kernel-flat.bin` 对应位置相同。
+
+### 未验证的假设（上机后最可能出问题的地方）
+
+1. **bootloader 跳到我们时 MMU/缓存的状态**。若它开着 MMU 且不是恒等映射，第 5 步关 MMU
+   之后取指就会错。U-Boot 的 `cleanup_before_linux()` 通常会关掉，但没实测过。
+2. **装载地址不与自己重叠**。bootloader 一般把 `boot.img` 的内核段放在 DRAM 低处
+   （约 `0x80000000`），而我们搬到 `0x9f000000`，相距 500 MB。若它恰好在 `0x9f000000`
+   附近装载，拷贝会覆盖正在执行的代码。
+3. **`0x9f000000` 以上确实无人使用**。这是按固件保留区推断的，ATF/bootloader 是否另有
+   占用未知。
+4. **XNU 能否在非 Apple 平台上走到出日志那一步**——这一步完全没验证过。
+
+### 建议的推进顺序
+
+先跑 `hello-uart`（225 字节，只验证"能不能跑我们的代码 + 串口/屏幕通不通"），
+确认无误后再跑 `loader-v1`。**不要一上来就跳 loader v1**——它一次性改变了太多变量，
+出问题时分不清是搬运错了、参数错了，还是 XNU 本身起不来。
