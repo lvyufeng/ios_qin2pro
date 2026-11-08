@@ -6,9 +6,11 @@ description = "UNISOC SC9863A (SharkL3), 8 x Cortex-A55"
 # The vendor kernel this description was read out of. Not a build input: the
 # device tree here is hand-written from it, not generated.
 source_repository = "https://github.com/KevinXu07/android_kernel_qin_qin2pro"
-source_revision = "qin2pro-bringup"
+source_revision = "55ba83c0ea43925b2b2421f24c59b80565cdfb90"
 
-# Only what exists and is verified on this SoC. GPU (PowerVR GE8322) has no
-# component: Adreno740/AdrenoMetal are Qualcomm-only, and nothing else exists.
+# Drivers only: [components] include names entries from the UniXNU drivers/
+# directory. XnuPrelink is a kit, not a driver, so it does not belong here.
+# GPU (PowerVR GE8322) has no component at all: Adreno740/AdrenoMetal are
+# Qualcomm-specific and nothing else exists for Rogue.
 [components]
-include = ["ArmCpu", "ArmDTPlatform", "ArmVirtPlatform", "SoftwareAES", "XnuPrelink", "DarwinBoot"]
+include = ["ArmCpu", "ArmDTPlatform", "ArmVirtPlatform", "SoftwareAES", "DarwinBoot"]

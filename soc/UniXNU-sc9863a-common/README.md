@@ -94,6 +94,36 @@ dtc -I dtb -O dts build/hardware.dtb                            # UART0/1/2 与 
 > 虚拟定时器要出中断，EL2 必须在进入 EL1 前设置好 `CNTVOFF` 并使能中断。展锐固件到底
 > 传了什么，静态分析看不到——这是上机后要确认的点之一。
 
+## 与官方 SoC 仓库的结构对照
+
+对着 `UniXNU/UniXNU-sm8550-common` 核了一遍，让这一层能被 UniXNU 直接当 SoC 模块用：
+
+| 项 | 官方 sm8550-common | 本层 | 说明 |
+| --- | --- | --- | --- |
+| `soc.toml` | ✅ `schema_version = 2` | ✅ | 同格式 |
+| `configs/` | ✅ | ✅ | `sc9863a.config` |
+| `dts/` | ✅ | ✅ | `sc9863a.dtsi` |
+| `patches/` | ✅ | ✅ | `patches/xnu/{series,sc9863a-uart.patch}` |
+| `README.md` | ✅ | ✅ | |
+| `LICENSE` | ✅ BSD-2-Clause-Patent | ✅ 同 | 已补 |
+| `kits/` | ✅ | ➖ | 本 SoC 没有需要捆绑的 kit |
+| `source_revision` | 完整 commit | ✅ 完整 commit | 从分支名改成 `55ba83c0…` |
+
+### 修正过的一处
+
+`[components] include` 里原本写了 `XnuPrelink`，但它是 UniXNU 的 **kit**，不是
+`drivers/` 下的组件。官方 sm8550 的清单里只列 driver（`ArmCpu`、`ArmDTPlatform`、
+`Adreno740`、`AdrenoMetal`）。已删除，现在列的是：
+
+```
+ArmCpu, ArmDTPlatform, ArmVirtPlatform, SoftwareAES, DarwinBoot
+```
+
+这五个都能在 `UniXNU/UniXNU/drivers/` 下找到同名目录。
+
+> 注意：本层目前**还没有被真正消费过**——设备仓库仍是 format 1，UniXNU 不会去读
+> `soc.toml`。格式正确性是对照官方仓库核的，不是跑通的。
+
 ## 未做的
 
 - 没有固件（UEFI）可用，`[firmware]` 段无从填写。
