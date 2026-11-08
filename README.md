@@ -6,7 +6,12 @@
 [`hxzbaka/UniXNU-t610yp`](https://github.com/hxzbaka/UniXNU-t610yp)（UMS512 / T610）。
 
 > **权限与边界**：目标是"内核能起来、日志能出来"，不是可日常使用的系统。
-> 全程 RAM 运行、不写分区。iOS 用户态与激活不在本项目范围内（见 HackiOS 的 `LEGAL.md`）。
+> iOS 用户态与激活不在本项目范围内（见 HackiOS 的 `LEGAL.md`）。
+>
+> **部署方式已修正**：原计划用 `fastboot boot` 把镜像放进内存跑、不碰闪存，但**这条命令在
+> 本机 bootloader 里不存在**（见 `docs/bootloader-analysis.md`）。现在只能
+> `fastboot flash boot`，即**会写分区**。原厂 `boot.img` 已保存在
+> `firmware/stock-boot.img.gz`，回滚步骤见 `docs/recovery.md`。
 
 ## 设备事实（已实测）
 
@@ -111,9 +116,20 @@ ADT：
 
 ```sh
 python3 scripts/make-s9863a1h10-adt.py --output build/adt.dtb \
-    --dram-size 0x80000000 --owned-memory-size 0x10000000 \
+    --dram-size 0x80000000 \
     --cpu-regs 0,0x100,0x200,0x300,0x400,0x500,0x600,0x700
+python3 scripts/check-adt.py build/adt.dtb      # 31 项契约检查，失败会非零退出
 python3 scripts/dump-adt.py build/adt.dtb
+
+# 内核装载计划与摊平（loader 用）
+python3 scripts/kernel-loadplan.py build/artifacts/kernel.macho --base 0x80000000
+python3 scripts/build-kernel-image.py build/artifacts/kernel.macho \
+    --output build/payload/kernel-flat.bin
+
+# 两个 payload
+python3 scripts/build-payload.py payload
+python3 scripts/build-payload.py payload --source payload/loader-v0.S \
+    --output build/payload/loader-v0.bin
 ```
 
 配置解析（需要一份 UniXNU 检出）：
@@ -147,17 +163,25 @@ python3 scripts/dump-adt.py build/adt.dtb
   sha256 `e12c29ae…eb4504`，基于 `xnu-10063.141.1`，内含 SC9863A **ttyS1（`0x70100000`）** 的 polled UART 驱动。
 - **未做过预链接**（没有 IPSW/kernelcache），`kernel.json` 记 `prelink_skipped: true`。
 - **未在任何硬件上运行过**，`boot_verified: false`。
+- **待跑镜像已就绪**：`hello-uart`（225 字节，串口与 framebuffer 双信道）、
+  `loader-v0`（构造 `boot_args`、内嵌 ADT、十六进制回读），都零重定位。
 - 设备仓库按 **format 1** 被 UniXNU CLI 解析（`schema_version` 未声明）。
   format 2 需要 `uefi-<device>` 固件仓库与 `ipados-*` OS profile，**SC9863A 两者都没有**；
   共享 SoC 层已按 format 2 规范单独建立，可独立成库。
-- 设备侧未有任何启动尝试：手机仍停在 bootloader 的 fastboot，等待定制 fastboot 工具。
+- **设备侧卡在 USB 通信上**：`fastboot boot` 不存在，而 `fastboot flash` 需要能跟 bootloader
+  通信。platform-tools 看不见该设备；自写客户端（`scripts/fastboot-lite.py`）能枚举、能
+  `claim_interface`，但 bootloader 的批量端点不工作（写超时、读 stall）。**尚未成功刷写过任何镜像。**
+- 排查两轮后设备进入 USB 无响应状态（`GET_DESCRIPTOR` 仍应答，其余请求全部超时），
+  需要物理断电重启。全过程见 `docs/usb-fastboot-notes.md`；一键流程见 `scripts/bringup.sh`。
 
 ## 已知风险
 
 - **串口未必可达**：手机通常不引出 debug UART，`0x70100000`（ttyS1）可能打不出东西。
   备选是 framebuffer（`0x9d000000`，固件 DTB 里的 `fb_reserved`）或 loader 的 USB 日志通道。
-- **定时器频率未知**：固件通过 `CNTFRQ` 设置，DTS 里不写。默认按 `26000000`，错了只影响计时，不影响出日志。
-- **fastboot 非标准**：本机 bootloader 的 fastboot 无法被 Android platform-tools 识别，
-  社区做法是使用展锐定制 fastboot（见 `docs/sources.md`）。
+- ~~定时器频率未知~~ **已确认 26 MHz**：固件设备树的 `/timer/clock-frequency = <0x18cba80>`。
+- **XNU 用的是虚拟定时器**（`CNTV_CTL_EL0`）。它要出中断，EL2 必须在进 EL1 前设好 `CNTVOFF`
+  并使能中断，展锐固件传了什么静态分析看不到——上机后需确认。
+- **fastboot 在本机不可用**：platform-tools 看不见设备；自写客户端能枚举但端点不响应。
+  备用通道是 SoC 内部的 BROM（`spd_dump` 已在本机编译通过），尚未验证。
 - **补丁双份**：`patches/sc9863a/` 与 `soc/.../patches/xnu/` 各有一份 UART 补丁，
   内容相同（后者是规范位置）。迁移到 format 2 后应删除设备侧那份。
