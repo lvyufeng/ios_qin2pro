@@ -155,7 +155,7 @@ class Fastboot:
     def _read(self, timeout=4000):
         return self.usb.read(self.handle, self.in_endpoint, 1024, timeout)
 
-    def response(self):
+    def response(self, timeout=4000):
         """Read one fastboot reply.
 
         Android hosts expect STATUS + four hex digits of length + payload, but
@@ -165,7 +165,7 @@ class Fastboot:
         """
         buffer = b''
         for _ in range(8):
-            rc, data = self._read(timeout=4000 if not buffer else 800)
+            rc, data = self._read(timeout=timeout if not buffer else 800)
             if rc < 0:
                 if not buffer:
                     return None
@@ -309,7 +309,8 @@ def main():
         if view:
             print('max-download-size: %s' % view[1].decode('ascii', 'replace'),
                   file=sys.stderr)
-        result = fb.command('flash:%s' % args.partition)
+        fb._write(('flash:%s' % args.partition).encode())
+        result = fb.response(timeout=45000)
         if result is None:
             raise SystemExit('no response to flash; the gadget may be wedged')
         status, body = result
