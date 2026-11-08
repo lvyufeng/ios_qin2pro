@@ -13,6 +13,8 @@
 > `fastboot flash boot`，即**会写分区**。原厂 `boot.img` 已保存在
 > `firmware/stock-boot.img.gz`，回滚步骤见 `docs/recovery.md`。
 
+> **接手请先读 [`docs/handoff.md`](docs/handoff.md)**：一页纸讲清已验证什么、卡在哪、怎么继续。
+
 ## 设备事实（已实测）
 
 | 项目 | 值 |
