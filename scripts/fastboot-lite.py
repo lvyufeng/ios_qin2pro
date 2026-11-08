@@ -106,11 +106,20 @@ class Usb:
         return bytes(buf[:got])
 
     def bulk(self, handle, endpoint, data, timeout=3000):
+        """Write `data`. For reads use read(): a zero-length IN transfer is not
+        a valid request and macOS answers it with a stall."""
         buf = (C.c_ubyte * max(len(data), 1))()
         for index, byte in enumerate(data):
             buf[index] = byte
         got = C.c_int(0)
         rc = self.lib.libusb_bulk_transfer(handle, endpoint, buf, len(data), C.byref(got), timeout)
+        return rc, bytes(buf[:got.value])
+
+    def read(self, handle, endpoint, size=1024, timeout=3000):
+        """Read up to `size` bytes from an IN endpoint."""
+        buf = (C.c_ubyte * size)()
+        got = C.c_int(0)
+        rc = self.lib.libusb_bulk_transfer(handle, endpoint, buf, size, C.byref(got), timeout)
         return rc, bytes(buf[:got.value])
 
 
@@ -143,38 +152,49 @@ class Fastboot:
         rc, _ = self.usb.bulk(self.handle, self.out_endpoint, payload, timeout)
         return rc
 
-    def _read(self, want=None, timeout=4000):
-        rc, data = self.usb.bulk(self.handle, self.in_endpoint, b'', timeout)
-        return rc, data
+    def _read(self, timeout=4000):
+        return self.usb.read(self.handle, self.in_endpoint, 1024, timeout)
 
     def response(self):
-        """Read one fastboot reply: OKAY/FAIL/DATA plus its payload."""
+        """Read one fastboot reply.
+
+        Android hosts expect STATUS + four hex digits of length + payload, but
+        U-Boot 2015.07 sends STATUS + payload with no length prefix (verified on
+        this device: `getvar:version` answers seven bytes, "OKAY1.0"). Only
+        strip a length field when it is self-consistent.
+        """
         buffer = b''
-        for _ in range(16):
-            rc, data = self._read()
+        for _ in range(8):
+            rc, data = self._read(timeout=4000 if not buffer else 800)
             if rc < 0:
-                return None
+                if not buffer:
+                    return None
+                break
+            if not data:
+                break
             buffer += data
-            if len(buffer) < 8 or buffer[:4] not in (b'OKAY', b'FAIL', b'DATA', b'INFO'):
+            if len(buffer) >= 4 and buffer[:4] in (b'OKAY', b'FAIL', b'DATA', b'INFO'):
                 continue
+        if len(buffer) < 4:
+            return None
+        status = buffer[:4].decode('ascii', 'replace')
+        body = buffer[4:]
+        if len(body) >= 4:
             try:
-                length = int(buffer[4:8], 16)
+                length = int(body[:4], 16)
             except ValueError:
-                return None
-            while len(buffer) < 8 + length:
-                rc, more = self._read()
-                if rc < 0:
-                    break
-                buffer += more
-            if buffer[:4] == b'INFO':
-                buffer = buffer[8 + length:]
-                continue
-            return buffer[:4].decode(), buffer[8:8 + length]
-        return None
+                length = None
+            if length is not None and len(body) - 4 == length:
+                body = body[4:]
+        if status == 'INFO':
+            return self.response()
+        return (status, body)
 
     def command(self, text):
-        if self._write(text.encode()) < 0:
-            return None
+        # The OUT transfer usually reports a timeout even though the gadget
+        # received the command (observed on macOS with this U-Boot). Treat the
+        # write as best-effort and let the response decide.
+        self._write(text.encode())
         return self.response()
 
     def download(self, payload, chunk=512 * 1024):
@@ -184,8 +204,14 @@ class Fastboot:
         offset = 0
         while offset < len(payload):
             block = payload[offset:offset + chunk]
-            if self._write(block, timeout=15000) < 0:
-                return ('FAIL', b'bulk write failed')
+            # macOS reports a timeout on these OUT transfers even when the
+            # gadget takes the data, so do not treat rc < 0 as fatal: if the
+            # data really did not arrive the gadget keeps waiting for it and
+            # the final read below fails, which aborts before any flash command.
+            rc = self._write(block, timeout=15000)
+            if rc < 0:
+                print('note: bulk write returned %d after %d bytes (continuing)'
+                      % (rc, len(block)), file=sys.stderr)
             offset += len(block)
         return self.response()
 
@@ -214,6 +240,8 @@ def main():
     sub.add_parser('list')
     getvar = sub.add_parser('getvar')
     getvar.add_argument('name')
+    reboot = sub.add_parser('reboot', help='reboot the device out of fastboot')
+    reboot.add_argument('target', nargs='?', default='')
     flash = sub.add_parser('flash')
     flash.add_argument('partition')
     flash.add_argument('image')
@@ -248,6 +276,11 @@ def main():
     time.sleep(0.2)
 
     fb = Fastboot(usb, handle, in_endpoint, out_endpoint)
+
+    if args.command == 'reboot':
+        text = 'reboot' if not args.target else 'reboot-%s' % args.target
+        print('reboot: %r' % (fb.command(text),))
+        return
     print('device %#06x:%#06x interface %d endpoints out=%#04x in=%#04x'
           % (desc.idVendor, desc.idProduct, interface['number'], out_endpoint, in_endpoint),
           file=sys.stderr)
