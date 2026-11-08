@@ -178,6 +178,11 @@ _start:
     isb
     tlbi    vmalle1
     dsb     sy
+    /* DarwinEnter also invalidates the I-cache before branching; we never
+     * executed at KERNEL_DST, but one instruction is cheaper than a stale
+     * line theory. */
+    ic      iallu
+    dsb     sy
     isb
 
     movz    x1, #(KERNEL_ENTRY & 0xffff)
