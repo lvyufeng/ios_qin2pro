@@ -88,6 +88,7 @@ docs/payload-bringup.md         最小 payload：一条命令验证两个前提
 docs/bootloader-analysis.md     从固件查证 bootloader 支持哪些 fastboot 命令
 docs/recovery.md                刷机前的回滚准备与原厂内核凭据
 docs/xnu-handoff.md             把控制权交给 XNU 的协议（boot_args / 入口偏移）
+docs/handoff.md                 交接：现状、三个镜像、怎么继续
 ```
 
 ## 构建内核
